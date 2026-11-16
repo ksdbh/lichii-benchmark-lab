@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "scenario": "oot-kokiri-forest",
+  "program_id": "0400486024DEC000",
+  "approved_revisions": [
+    "7c7f723b6895f806f45629444904414f8d373fbc",
+    "ac113a1c9c48a47ade8007e321818f06e05af7d6"
+  ],
+  "repeats_per_variant": 4,
+  "measurement_frames": 600,
+  "warmup_frames": 120,
+  "min_fps_change_percent": 8,
+  "max_p99_regression_percent": 10,
+  "max_run_variation_percent": 5
+}

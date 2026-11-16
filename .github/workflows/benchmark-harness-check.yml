@@ -1,0 +1,34 @@
+name: Benchmark harness checks
+
+on:
+  push:
+    paths:
+      - 'benchmark/**'
+      - '.github/workflows/benchmark-harness-check.yml'
+  pull_request:
+    paths:
+      - 'benchmark/**'
+      - '.github/workflows/benchmark-harness-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-harness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Test planning and offline comparison
+        run: python3 -I -m unittest discover -s tools/nx2/benchmark -p test_m4_benchmark.py
+      - name: Check Python and example JSON
+        run: |
+          python3 -I -m py_compile benchmark/m4_benchmark.py
+          python3 -I -m json.tool benchmark/suite.example.json > /dev/null

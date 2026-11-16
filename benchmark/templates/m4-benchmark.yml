@@ -1,0 +1,68 @@
+# Copy into a PRIVATE controller repository as .github/workflows/m4-benchmark.yml.
+# This template creates a plan only. It does not build or launch an emulator.
+name: M4 benchmark plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_sha:
+        description: Baseline source commit (full 40-character SHA)
+        required: true
+        type: string
+      candidate_sha:
+        description: Candidate source commit (full 40-character SHA)
+        required: true
+        type: string
+      cache:
+        description: Profile cache condition (does not reset the system Metal cache)
+        required: true
+        type: choice
+        default: warm
+        options:
+          - warm
+          - cold_profile
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lichii-m4-benchmark
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: >-
+      github.event.repository.private == true &&
+      vars.M4_BENCHMARK_ENABLED == 'true' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: [self-hosted, macOS, ARM64, lichii-m4]
+    timeout-minutes: 10
+    steps:
+      - name: Check out reviewed controller code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate inputs and write plan
+        env:
+          BASELINE_SHA: ${{ inputs.baseline_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CACHE_MODE: ${{ inputs.cache }}
+        shell: bash
+        run: |
+          python3 -I benchmark/m4_benchmark.py plan \
+            --suite benchmark/suite.example.json \
+            --baseline "$BASELINE_SHA" \
+            --candidate "$CANDIDATE_SHA" \
+            --cache "$CACHE_MODE" \
+            --out "$RUNNER_TEMP/m4-plan-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+
+      - name: Record scaffold status
+        shell: bash
+        run: |
+          printf '%s\n' \
+            '### Plan only — no benchmark executed' \
+            'Input validation completed. The plan remains on the private runner.' \
+            'No emulator was built or launched, and no performance result was produced.' \
+            >> "$GITHUB_STEP_SUMMARY"
