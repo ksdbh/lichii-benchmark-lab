@@ -76,7 +76,7 @@ Output files must not already exist. Reports contain selected aggregate fields, 
 The `.github/workflows/benchmark-harness-check.yml` runs only Python tests on a GitHub-hosted Ubuntu runner. It never selects the M4 runner or executes a game. Local checks are:
 
 ```sh
-python3 -I -m unittest discover -s tools/nx2/benchmark -p test_m4_benchmark.py
+python3 -I -m unittest discover -s benchmark -p test_m4_benchmark.py
 actionlint -config-file benchmark/actionlint.yaml \
   .github/workflows/benchmark-harness-check.yml \
   benchmark/templates/m4-benchmark.yml

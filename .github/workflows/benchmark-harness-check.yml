@@ -27,7 +27,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Test planning and offline comparison
-        run: python3 -I -m unittest discover -s tools/nx2/benchmark -p test_m4_benchmark.py
+        run: python3 -I -m unittest discover -s benchmark -p test_m4_benchmark.py
       - name: Check Python and example JSON
         run: |
           python3 -I -m py_compile benchmark/m4_benchmark.py
