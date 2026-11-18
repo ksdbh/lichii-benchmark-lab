@@ -136,6 +136,48 @@ def run_metrics(record, expected, plan):
             "max_ms": ordered[-1], "over100_ms": sum(x > 100 for x in intervals)}
 
 
+def make_recording(plan, run_id, receipt, timestamps):
+    """Convert consecutive present boundaries from a trusted recorder, without running a game."""
+    checked_plan(plan)
+    expected = next((run for run in plan["runs"] if run["id"] == run_id), None)
+    if expected is None:
+        raise BenchmarkError("run ID is not in the generated plan")
+    if not isinstance(receipt, dict):
+        raise BenchmarkError("receipt must be a metadata object")
+    if any(key in receipt for key in ("intervals_ms", "elapsed_s", "coverage")):
+        raise BenchmarkError("receipt must not supply timing fields; use the timestamp recording")
+    if (not isinstance(timestamps, dict) or type(timestamps.get("schema")) is not int or
+            timestamps["schema"] != 1 or timestamps.get("clock") != "monotonic_ns"):
+        raise BenchmarkError("timestamps require schema 1 and the monotonic_ns clock")
+    boundaries = timestamps.get("boundaries")
+    if not isinstance(boundaries, list) or len(boundaries) != expected["measurement_frames"] + 1:
+        raise BenchmarkError("timestamps require one more boundary than the planned frame intervals")
+    previous = None
+    intervals = []
+    first_ns = None
+    for boundary in boundaries:
+        if not isinstance(boundary, dict):
+            raise BenchmarkError("each boundary must contain a present counter and timestamp")
+        present = integer(boundary.get("present"), "present counter", 0, 2**64 - 1)
+        timestamp = integer(boundary.get("timestamp_ns"), "timestamp_ns", 0, 2**63 - 1)
+        if previous is None:
+            first_ns = timestamp
+        else:
+            if present != previous[0] + 1:
+                raise BenchmarkError("present counters are not consecutive; the recording has gaps")
+            if timestamp <= previous[1]:
+                raise BenchmarkError("present timestamps must be strictly increasing")
+            intervals.append((timestamp - previous[1]) / 1_000_000)
+        previous = (present, timestamp)
+    keys = ("schema", "id", "variant", "revision", "cache", "program_id", "plan_sha256",
+            "scene_verified", "image_check_passed", "clean_window", "completed", *FINGERPRINTS)
+    record = {key: receipt[key] for key in keys if key in receipt}
+    record.update(coverage="all_present_intervals", intervals_ms=intervals,
+                  elapsed_s=(previous[1] - first_ns) / 1_000_000_000)
+    run_metrics(record, expected, plan)
+    return record
+
+
 def compare(plan, recordings):
     checked_plan(plan)
     result = {"schema": 1, "status": "inconclusive", "scenario": plan["suite"]["scenario"],
@@ -227,6 +269,12 @@ def main():
     p.add_argument("--candidate", required=True)
     p.add_argument("--cache", choices=("warm", "cold_profile"), default="warm")
     p.add_argument("--out", type=Path)
+    p = commands.add_parser("record", help="Convert complete present timestamps offline")
+    p.add_argument("--plan", type=Path, required=True)
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--receipt", type=Path, required=True)
+    p.add_argument("--timestamps", type=Path, required=True)
+    p.add_argument("--out", type=Path)
     p = commands.add_parser("compare")
     p.add_argument("--plan", type=Path, required=True)
     p.add_argument("--recordings", type=Path, required=True)
@@ -242,6 +290,10 @@ def main():
             value = make_plan(json.loads(args.suite.read_text()), args.baseline, args.candidate, args.cache)
         elif args.command == "compare":
             value = compare(json.loads(args.plan.read_text()), json.loads(args.recordings.read_text()))
+        elif args.command == "record":
+            value = make_recording(json.loads(args.plan.read_text()), args.run_id,
+                                   json.loads(args.receipt.read_text()),
+                                   json.loads(args.timestamps.read_text()))
         else:
             value = preflight()
         write_result(value, args.out)

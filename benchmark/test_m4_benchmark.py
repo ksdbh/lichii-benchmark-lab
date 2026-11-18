@@ -36,6 +36,15 @@ class BenchmarkTests(unittest.TestCase):
             result.append(r)
         return result
 
+    def receipt_and_timestamps(self):
+        receipt = self.recordings()[0]
+        for key in ("coverage", "intervals_ms", "elapsed_s"):
+            receipt.pop(key)
+        trace = {"schema": 1, "clock": "monotonic_ns", "boundaries": [
+            {"present": 900 + n, "timestamp_ns": 10**18 + n * 20_000_000}
+            for n in range(self.suite["measurement_frames"] + 1)]}
+        return receipt, trace
+
     def test_alternating_pairs_are_abba(self):
         self.assertEqual([x["variant"] for x in self.plan["runs"]],
                          ["baseline", "candidate", "candidate", "baseline"])
@@ -177,6 +186,100 @@ class BenchmarkTests(unittest.TestCase):
         result = json.dumps(bench.compare(self.plan, records))
         self.assertNotIn("/private", result)
         self.assertNotIn("intervals_ms", result)
+
+    def test_recording_uses_boundary_differences_without_losing_precision(self):
+        receipt, trace = self.receipt_and_timestamps()
+        record = bench.make_recording(self.plan, "run-001", receipt, trace)
+        self.assertEqual(record["intervals_ms"], [20] * 60)
+        self.assertEqual(record["elapsed_s"], 1.2)
+        self.assertEqual(bench.run_metrics(record, self.plan["runs"][0], self.plan)["fps"], 50)
+
+    def test_recording_preserves_a_long_pause(self):
+        receipt, trace = self.receipt_and_timestamps()
+        for boundary in trace["boundaries"][30:]:
+            boundary["timestamp_ns"] += 17_000_000_000
+        record = bench.make_recording(self.plan, "run-001", receipt, trace)
+        self.assertEqual(record["intervals_ms"][29], 17020)
+        self.assertAlmostEqual(record["elapsed_s"], 18.2)
+
+    def test_recording_needs_exact_boundary_count(self):
+        for change in (lambda b: b.pop(), lambda b: b.append(dict(b[-1]))):
+            receipt, trace = self.receipt_and_timestamps()
+            change(trace["boundaries"])
+            with self.assertRaises(bench.BenchmarkError):
+                bench.make_recording(self.plan, "run-001", receipt, trace)
+
+    def test_recording_rejects_dropped_or_repeated_present_counters(self):
+        for counter in (900, 902):
+            receipt, trace = self.receipt_and_timestamps()
+            trace["boundaries"][1]["present"] = counter
+            with self.assertRaises(bench.BenchmarkError):
+                bench.make_recording(self.plan, "run-001", receipt, trace)
+
+    def test_recording_rejects_duplicate_or_reversed_timestamps(self):
+        for offset in (0, -1):
+            receipt, trace = self.receipt_and_timestamps()
+            trace["boundaries"][1]["timestamp_ns"] = trace["boundaries"][0]["timestamp_ns"] + offset
+            with self.assertRaises(bench.BenchmarkError):
+                bench.make_recording(self.plan, "run-001", receipt, trace)
+
+    def test_recording_requires_bounded_integer_clock_and_counters(self):
+        for key in ("present", "timestamp_ns"):
+            for value in (True, 1.0, "1", -1, 10**400):
+                receipt, trace = self.receipt_and_timestamps()
+                trace["boundaries"][0][key] = value
+                with self.assertRaises(bench.BenchmarkError):
+                    bench.make_recording(self.plan, "run-001", receipt, trace)
+
+    def test_recording_rejects_ambiguous_clock_and_schema(self):
+        for key, value in (("schema", True), ("schema", 1.0), ("clock", "wall_time_ms")):
+            receipt, trace = self.receipt_and_timestamps()
+            trace[key] = value
+            with self.assertRaises(bench.BenchmarkError):
+                bench.make_recording(self.plan, "run-001", receipt, trace)
+
+    def test_recording_validates_observed_provenance_and_flags(self):
+        for key, value in (("revision", "f" * 40), ("completed", False), ("clean_window", 1)):
+            receipt, trace = self.receipt_and_timestamps()
+            receipt[key] = value
+            with self.assertRaises(bench.BenchmarkError):
+                bench.make_recording(self.plan, "run-001", receipt, trace)
+
+    def test_recording_cannot_supply_timing_in_metadata_receipt(self):
+        receipt, trace = self.receipt_and_timestamps()
+        receipt["elapsed_s"] = 0.1
+        with self.assertRaises(bench.BenchmarkError):
+            bench.make_recording(self.plan, "run-001", receipt, trace)
+
+    def test_recording_drops_private_extras_and_preserves_image_failure(self):
+        receipt, trace = self.receipt_and_timestamps()
+        receipt.update(private_log="/private/log", image_check_passed=False)
+        original = copy.deepcopy((receipt, trace))
+        record = bench.make_recording(self.plan, "run-001", receipt, trace)
+        self.assertNotIn("private_log", record)
+        self.assertFalse(record["image_check_passed"])
+        self.assertEqual((receipt, trace), original)
+
+    def test_recording_unknown_run_is_rejected(self):
+        receipt, trace = self.receipt_and_timestamps()
+        with self.assertRaises(bench.BenchmarkError):
+            bench.make_recording(self.plan, "run-999", receipt, trace)
+
+    def test_record_cli_produces_a_valid_offline_recording(self):
+        receipt, trace = self.receipt_and_timestamps()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for name, value in (("plan", self.plan), ("receipt", receipt), ("timestamps", trace)):
+                (root / (name + ".json")).write_text(json.dumps(value))
+            p = subprocess.run([sys.executable, "-I", str(HERE / "m4_benchmark.py"), "record",
+                                "--plan", str(root / "plan.json"), "--run-id", "run-001",
+                                "--receipt", str(root / "receipt.json"),
+                                "--timestamps", str(root / "timestamps.json")],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            record = json.loads(p.stdout)
+            self.assertEqual(record["coverage"], "all_present_intervals")
+            self.assertEqual(len(record["intervals_ms"]), 60)
 
     def test_preflight_refuses_other_platforms(self):
         with patch.object(bench.platform, "system", return_value="Linux"):

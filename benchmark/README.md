@@ -51,7 +51,7 @@ Only explicitly reviewed aggregate reports should leave the private controller. 
 
 ## Recording and comparison format
 
-There is no recording exporter or raw-log importer yet. `compare` accepts a JSON array in the exact generated run order, with one recording per planned run. Each recording supplies:
+The offline `record` command converts complete present timestamps into validated recordings. Native timestamp capture and a raw-log importer are not implemented yet. `compare` accepts a JSON array in the exact generated run order, with one recording per planned run. Each recording supplies:
 
 - `schema: 1`, matching `id`, `variant`, `revision`, `cache` and `program_id`.
 - `plan_sha256`: SHA-256 of the plan serialized with Python `json.dumps(plan, sort_keys=True, separators=(",", ":"))`, encoded as UTF-8. This binds the recording to the complete plan, including its scenario, measurement limits and schedule.
@@ -59,7 +59,37 @@ There is no recording exporter or raw-log importer yet. `compare` accepts a JSON
 - Explicit boolean `scene_verified`, `image_check_passed`, `clean_window` and `completed` fields. The trusted recorder must supply these checks; setting a field does not itself establish the fact.
 - Five lowercase SHA-256 values: `machine_fingerprint`, `settings_fingerprint`, `driver_fingerprint`, `checkpoint_fingerprint` and `cache_snapshot_fingerprint`. Each corresponding fingerprint must agree across all recordings. The cache fingerprint identifies the initial copied seed before variant-specific warm-up, not the resulting warmed cache bytes. The future adapter must define reproducible inputs to these hashes before it can produce trustworthy comparisons.
 
-Keep these recordings private. To produce the aggregate report:
+### Converting captured timestamps
+
+Supply a metadata receipt with the fields above except `coverage`, `intervals_ms` and `elapsed_s`; timing fields in the receipt are rejected. The receipt must come from a trusted recorder. Conversion validates its format and plan identity, but cannot establish that the scene or image checks actually occurred.
+
+The timestamp file uses this structure (shown abbreviated):
+
+```json
+{
+  "schema": 1,
+  "clock": "monotonic_ns",
+  "boundaries": [
+    {"present": 900, "timestamp_ns": 1000000000000000000},
+    {"present": 901, "timestamp_ns": 1000000000020000000}
+  ]
+}
+```
+
+Capture exactly `measurement_frames + 1` consecutive boundaries after warm-up. Present counters must be consecutive integers; monotonic nanosecond timestamps must strictly increase. Missing or repeated boundaries are rejected. A long time between consecutive presents remains a long interval, so stalls contribute to elapsed time, FPS and tail latency. Timestamps are subtracted as integers before conversion to milliseconds to preserve precision at large clock origins.
+
+```sh
+python3 -I benchmark/m4_benchmark.py record \
+  --plan /tmp/m4-plan.json --run-id run-001 \
+  --receipt /tmp/m4-receipt.json --timestamps /tmp/m4-presents.json \
+  --out /tmp/m4-run-001.json
+```
+
+The output contains only the documented recording fields; extra receipt fields are discarded. This command launches nothing and does not collect timestamps itself. A successful conversion means the recording validates, not that performance improved or an image check passed. An explicit failed image check is retained for comparison.
+
+### Comparing runs
+
+Keep recordings private. Assemble the individual recording objects into one JSON array in the plan's run order. To produce the aggregate report:
 
 ```sh
 python3 -I benchmark/m4_benchmark.py compare \

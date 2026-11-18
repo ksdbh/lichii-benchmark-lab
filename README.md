@@ -2,7 +2,7 @@
 
 A standalone toolkit for planning repeatable Apple M4 emulator comparisons and validating complete frame recordings.
 
-**Current state: scaffold.** Planning, read-only host preflight, offline comparison and synthetic-data tests work. Emulator execution is deliberately disabled. No runner is registered, no cloud resources are created, and no gameplay performance result is claimed.
+**Current state: scaffold.** Planning, read-only host preflight, offline timestamp conversion, comparison and synthetic-data tests work. Emulator execution is deliberately disabled. No runner is registered, no cloud resources are created, and no gameplay performance result is claimed.
 
 The project contains original benchmark tooling developed under the `ksdbh` account. It was first published in [the Lichii fork’s scaffold contribution](https://github.com/ksdbh/Lichii/commit/f8dd2a2c05ffa3fe933f650ae3d6df3c73b42a27). This independent repository contains the harness only; it does not import the emulator’s source or history.
 
@@ -22,6 +22,7 @@ python3 -I benchmark/m4_benchmark.py preflight
 
 - Reviewed full-commit allowlists and alternating baseline/candidate schedules.
 - Strict recording provenance and complete-interval validation.
+- Offline conversion of consecutive present timestamps, preserving stalls and rejecting missing boundaries.
 - Provisional FPS and tail-latency comparisons, including inconclusive and correctness-failure results.
 - A/A control checks that do not label identical-code discrepancies as optimizations.
 - A dormant private-controller workflow template, plus hosted-only unit-test CI.
