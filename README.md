@@ -24,6 +24,7 @@ python3 -I benchmark/m4_benchmark.py preflight
 - Strict recording provenance and complete-interval validation.
 - Offline conversion of consecutive present timestamps, preserving stalls and rejecting missing boundaries.
 - Provisional FPS and tail-latency comparisons, including inconclusive and correctness-failure results.
+- Concise Markdown comparison reports alongside the default JSON output.
 - A/A control checks that do not label identical-code discrepancies as optimizations.
 - A dormant private-controller workflow template, plus hosted-only unit-test CI.
 

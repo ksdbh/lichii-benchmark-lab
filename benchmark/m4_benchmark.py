@@ -236,6 +236,34 @@ def compare(plan, recordings):
     return result
 
 
+def comparison_markdown(result):
+    """Render the selected aggregate fields returned by compare()."""
+    lines = ["# Benchmark comparison", "", f"Status: **`{result['status']}`**", "",
+             f"Scenario: `{result['scenario']}`", "",
+             f"Plan SHA-256: `{result['plan_sha256']}`", ""]
+    if result["reasons"]:
+        lines.extend(["Reasons:", "", *(f"- {reason}" for reason in result["reasons"]), ""])
+    variants = result["variants"]
+    if variants:
+        lines.extend(["| Metric | Baseline | Candidate |", "| --- | ---: | ---: |"])
+        for label, key, decimals in (
+                ("Runs", "runs", 0), ("Median run FPS", "median_run_fps", 2),
+                ("Median run p99 (ms)", "median_run_p99_ms", 2),
+                ("Worst frame (ms)", "worst_frame_ms", 2),
+                ("Frames over 100 ms (all runs)", "frames_over100_ms", 0),
+                ("Max run FPS variation (%)", "max_fps_variation_percent", 2)):
+            before, after = (variants[v][key] for v in ("baseline", "candidate"))
+            lines.append(f"| {label} | {before:.{decimals}f} | {after:.{decimals}f} |")
+        lines.extend(["", f"FPS change: {result['fps_change_percent']:+.2f}% (higher is better).",
+                      f"p99 change: {result['p99_change_percent']:+.2f}% (lower is better).", ""])
+    else:
+        lines.extend(["Comparable metrics are unavailable because the recordings did not validate.", ""])
+    lines.append("Configured thresholds are provisional, not statistical confidence intervals. "
+                 "Fingerprints and scene/image checks require a trusted recorder. "
+                 "FPS alone does not identify a JIT or GPU cause.")
+    return "\n".join(lines) + "\n"
+
+
 def preflight():
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise BenchmarkError("native Apple silicon macOS is required")
@@ -251,13 +279,16 @@ def preflight():
                        "Does not launch an emulator or change power/security settings."]}
 
 
-def write_result(value, output):
-    payload = json.dumps(value, indent=2, allow_nan=False) + "\n"
+def write_text(payload, output):
     if output:
         with output.open("x", encoding="utf-8") as stream:
             stream.write(payload)
     else:
         print(payload, end="")
+
+
+def write_result(value, output):
+    write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", output)
 
 
 def main():
@@ -278,6 +309,7 @@ def main():
     p = commands.add_parser("compare")
     p.add_argument("--plan", type=Path, required=True)
     p.add_argument("--recordings", type=Path, required=True)
+    p.add_argument("--format", choices=("json", "markdown"), default="json")
     p.add_argument("--out", type=Path)
     p = commands.add_parser("preflight")
     p.add_argument("--out", type=Path)
@@ -296,7 +328,10 @@ def main():
                                    json.loads(args.timestamps.read_text()))
         else:
             value = preflight()
-        write_result(value, args.out)
+        if args.command == "compare" and args.format == "markdown":
+            write_text(comparison_markdown(value), args.out)
+        else:
+            write_result(value, args.out)
         if args.command == "compare" and value["status"] in ("regression", "correctness_failure"):
             return 1
         if args.command == "compare" and value["status"] == "inconclusive":

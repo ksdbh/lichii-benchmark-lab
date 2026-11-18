@@ -1,6 +1,6 @@
 # M4 benchmark scaffold
 
-This directory prepares comparisons of two exact source revisions on the owner's M4. It currently validates inputs and creates a plan. It does not build, launch, control or benchmark an emulator. The `run` command refuses execution until a macOS execution adapter and a complete interval recorder are implemented. A successful planning job is not a benchmark pass.
+This directory prepares comparisons of two exact source revisions on the owner's M4. It validates plans, converts captured timestamps and compares complete recordings offline. It does not build, launch, control or benchmark an emulator. The `run` command refuses execution until a macOS execution adapter and a complete interval recorder are implemented. A successful planning job is not a benchmark pass.
 
 ## Does this need a separate repository?
 
@@ -97,9 +97,19 @@ python3 -I benchmark/m4_benchmark.py compare \
   --out /tmp/m4-comparison.json
 ```
 
+For a concise report suitable for local review or a future workflow summary:
+
+```sh
+python3 -I benchmark/m4_benchmark.py compare \
+  --plan /tmp/m4-plan.json --recordings /tmp/m4-recordings.json \
+  --format markdown --out /tmp/m4-comparison.md
+```
+
+JSON remains the default. Markdown shows the same decision, reasons and plan fingerprint, plus a baseline/candidate table when complete comparable metrics exist. It includes median run FPS, median run p99, worst frame, frames over 100 ms across all runs and run variation. Positive FPS change is better; negative p99 change is better. An inconclusive or correctness-failure status still applies even when the displayed FPS increases. Invalid or missing recordings produce reasons without a metrics table. Neither format uploads anything; review an aggregate report before sharing it.
+
 Output files must not already exist. Reports contain selected aggregate fields, not raw intervals, paths, images or logs. Missing, mismatched, incomplete or noisy evidence yields `inconclusive`; a recorded image-check failure yields `correctness_failure` once the recordings otherwise validate. Valid comparisons can report `regression`, `improvement` or `no_clear_change` using median run FPS, median run p99 and the configured thresholds. These labels are provisional decision rules, not statistical confidence intervals or an assertion that the recorder has been implemented.
 
-`compare` exits 2 for inconclusive/invalid input, 1 for regression or correctness failure, and 0 for improvement or no clear change. Exit 0 alone is not evidence of a speedup. No timing or correctness outcome is supplied by this scaffold itself.
+In either output format, `compare` exits 2 for inconclusive/invalid input, 1 for regression or correctness failure, and 0 for improvement or no clear change. Exit 0 alone is not evidence of a speedup. No timing or correctness outcome is supplied by this scaffold itself.
 
 ## Scaffold checks
 

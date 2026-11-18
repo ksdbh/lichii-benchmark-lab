@@ -187,6 +187,89 @@ class BenchmarkTests(unittest.TestCase):
         self.assertNotIn("/private", result)
         self.assertNotIn("intervals_ms", result)
 
+    def test_markdown_report_summarizes_improvement_without_private_records(self):
+        records = self.recordings(20, 16)
+        records[0]["private_log"] = "/private/game/log/data"
+        report = bench.comparison_markdown(bench.compare(self.plan, records))
+        self.assertIn("Status: **`improvement`**", report)
+        self.assertIn("| Median run FPS | 50.00 | 62.50 |", report)
+        self.assertIn("FPS change: +25.00% (higher is better)", report)
+        self.assertIn("p99 change: -20.00% (lower is better)", report)
+        self.assertIn(bench.plan_digest(self.plan), report)
+        self.assertIn("not statistical confidence intervals", report)
+        for private_field in ("/private", "intervals_ms", "machine_fingerprint"):
+            self.assertNotIn(private_field, report)
+
+    def test_markdown_missing_evidence_has_no_comparison_table(self):
+        report = bench.comparison_markdown(bench.compare(self.plan, []))
+        self.assertIn("Status: **`inconclusive`**", report)
+        self.assertIn("missing or unexpected run recordings", report)
+        self.assertIn("metrics are unavailable", report)
+        self.assertNotIn("| Metric |", report)
+        self.assertNotIn("FPS change:", report)
+
+    def test_markdown_exposes_image_failure_despite_better_fps(self):
+        records = self.recordings(20, 10)
+        records[0]["image_check_passed"] = False
+        report = bench.comparison_markdown(bench.compare(self.plan, records))
+        self.assertIn("Status: **`correctness_failure`**", report)
+        self.assertIn("a recorded image check failed", report)
+        self.assertIn("FPS change: +100.00%", report)
+
+    def test_markdown_preserves_hitches_and_noise_classification(self):
+        records = self.recordings()
+        records[0]["intervals_ms"][-1] = 17020
+        records[0]["elapsed_s"] = sum(records[0]["intervals_ms"]) / 1000
+        report = bench.comparison_markdown(bench.compare(self.plan, records))
+        self.assertIn("Status: **`inconclusive`**", report)
+        self.assertIn("run variation exceeds", report)
+        self.assertIn("| Worst frame (ms) | 17020.00 | 20.00 |", report)
+        self.assertIn("| Frames over 100 ms (all runs) | 1 | 0 |", report)
+
+    def test_compare_cli_formats_preserve_outcome_exit_codes(self):
+        failure = self.recordings(20, 10)
+        failure[0]["image_check_passed"] = False
+        cases = [(self.recordings(20, 16), "improvement", 0),
+                 (self.recordings(), "no_clear_change", 0),
+                 (self.recordings(20, 25), "regression", 1),
+                 (failure, "correctness_failure", 1), ([], "inconclusive", 2)]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "plan.json").write_text(json.dumps(self.plan))
+            for records, status, exit_code in cases:
+                (root / "records.json").write_text(json.dumps(records))
+                for fmt in (None, "json", "markdown"):
+                    with self.subTest(status=status, format=fmt):
+                        args = [sys.executable, "-I", str(HERE / "m4_benchmark.py"), "compare",
+                                "--plan", str(root / "plan.json"),
+                                "--recordings", str(root / "records.json")]
+                        if fmt:
+                            args.extend(["--format", fmt])
+                        p = subprocess.run(args, capture_output=True, text=True)
+                        self.assertEqual(p.returncode, exit_code, p.stderr)
+                        if fmt == "markdown":
+                            self.assertIn(f"Status: **`{status}`**", p.stdout)
+                        else:
+                            self.assertEqual(json.loads(p.stdout)["status"], status)
+
+    def test_markdown_cli_writes_once_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "plan.json").write_text(json.dumps(self.plan))
+            (root / "records.json").write_text(json.dumps(self.recordings()))
+            output = root / "report.md"
+            args = [sys.executable, "-I", str(HERE / "m4_benchmark.py"), "compare",
+                    "--plan", str(root / "plan.json"), "--recordings", str(root / "records.json"),
+                    "--format", "markdown", "--out", str(output)]
+            p = subprocess.run(args, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(p.stdout, "")
+            original = output.read_text()
+            self.assertIn("Status: **`no_clear_change`**", original)
+            p = subprocess.run(args, capture_output=True, text=True)
+            self.assertEqual(p.returncode, 2)
+            self.assertEqual(output.read_text(), original)
+
     def test_recording_uses_boundary_differences_without_losing_precision(self):
         receipt, trace = self.receipt_and_timestamps()
         record = bench.make_recording(self.plan, "run-001", receipt, trace)
